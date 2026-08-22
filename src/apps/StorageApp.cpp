@@ -1,21 +1,17 @@
 #include "StorageApp.h"
 
 #include <SPI.h>
-
 #include "Ui.h"
 #include "board_pins.h"
 #include "theme.h"
 
 void StorageApp::begin() {
-  // The WebUI keeps SD mounted globally so remote file access remains available.
-  // Reuse the existing mount and only initialize it when no card is visible yet.
-  ready_ = SD.cardType() != CARD_NONE;
-  if (!ready_) ready_ = SD.begin(BoardPins::SdCs, SPI, 10000000);
+  ready_ = SD.begin(BoardPins::SdCs, SPI, 10000000);
   if (ready_) refresh();
 }
 
 void StorageApp::end() {
-  // Intentionally do not call SD.end(): the WebUI owns the persistent mount.
+  SD.end();
 }
 
 void StorageApp::tick(uint32_t nowMs) {
@@ -35,10 +31,8 @@ void StorageApp::refresh() {
     names_[count_] = file.name();
     dirs_[count_] = file.isDirectory();
     ++count_;
-    file.close();
     file = root.openNextFile();
   }
-  root.close();
 }
 
 void StorageApp::render(TFT_eSPI& tft) {

@@ -6,7 +6,7 @@
 class SubGhzApp final : public App {
  public:
   SubGhzApp();
-  const char* name() const override { return "Sub-GHz Spectrum"; }
+  const char* name() const override { return "Sub-GHz Scope"; }
   const char* shortName() const override { return "SUBG"; }
   void begin() override;
   void end() override;
@@ -18,8 +18,6 @@ class SubGhzApp final : public App {
  private:
   void configureBand();
   void sampleStep();
-  void completeSweep();
-  float frequencyAt(uint8_t index) const;
   Module module_;
   CC1101 radio_;
   bool ready_ = false;
@@ -27,11 +25,5 @@ class SubGhzApp final : public App {
   int band_ = 1;
   int cursor_ = 0;
   float levels_[64]{};
-  float peaks_[64]{};
-  uint8_t waterfall_[4][64]{};
-  uint8_t waterfallRow_ = 0;
-  float strongestRssi_ = -120.0f;
-  float strongestFreq_ = 0.0f;
   uint32_t lastSampleUs_ = 0;
-  uint32_t lastJournalMs_ = 0;
 };
