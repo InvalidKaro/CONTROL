@@ -1,0 +1,218 @@
+name: Build ControlOS
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "src/**"
+      - "include/**"
+      - "platformio.ini"
+      - ".github/workflows/build.yml"
+
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    name: Build T-Embed CC1101 Plus
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ============================================================
+      # PYTHON
+      # ============================================================
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      # ============================================================
+      # NODE.JS
+      # Used to validate the JavaScript embedded inside WebUi.cpp.
+      # ============================================================
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # ============================================================
+      # PROJECT VALIDATION
+      # ============================================================
+      - name: Run ControlOS project validator
+        run: |
+          if [ -f scripts/validate_project.py ]; then
+            python scripts/validate_project.py
+          else
+            echo "No project validator found - skipping."
+          fi
+
+      # ============================================================
+      # WEBUI JAVASCRIPT VALIDATION
+      # ============================================================
+      - name: Validate embedded WebUI JavaScript
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          webui = Path("src/core/WebUi.cpp")
+
+          if not webui.exists():
+              raise SystemExit("src/core/WebUi.cpp not found")
+
+          source = webui.read_text(encoding="utf-8")
+
+          script_start = source.find("<script>")
+          script_end = source.find("</script>", script_start)
+
+          if script_start == -1 or script_end == -1:
+              raise SystemExit("Embedded WebUI <script> block not found")
+
+          script_start += len("<script>")
+
+          javascript = source[script_start:script_end]
+
+          output = Path("/tmp/controlos-webui.js")
+          output.write_text(javascript, encoding="utf-8")
+
+          print(f"Extracted WebUI JavaScript: {len(javascript)} bytes")
+          PY
+
+          node --check /tmp/controlos-webui.js
+
+      # ============================================================
+      # PLATFORMIO
+      # ============================================================
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade platformio
+
+      - name: Show PlatformIO version
+        run: |
+          pio --version
+
+      # ============================================================
+      # BUILD
+      # ============================================================
+      - name: Build ControlOS
+        run: |
+          pio run -e t_embed_cc1101_plus
+
+      # ============================================================
+      # BUILD SIZE
+      # ============================================================
+      - name: Show firmware size
+        run: |
+          pio run \
+            -e t_embed_cc1101_plus \
+            -t size
+
+      # ============================================================
+      # PREPARE OUTPUT
+      # ============================================================
+      - name: Prepare firmware artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BUILD_DIR=".pio/build/t_embed_cc1101_plus"
+          DIST_DIR="dist"
+
+          mkdir -p "$DIST_DIR"
+
+          if [ ! -f "$BUILD_DIR/firmware.bin" ]; then
+            echo "firmware.bin was not generated"
+            exit 1
+          fi
+
+          cp \
+            "$BUILD_DIR/firmware.bin" \
+            "$DIST_DIR/controlos-t-embed-cc1101-plus.bin"
+
+          if [ -f "$BUILD_DIR/firmware.elf" ]; then
+            cp \
+              "$BUILD_DIR/firmware.elf" \
+              "$DIST_DIR/controlos-t-embed-cc1101-plus.elf"
+          fi
+
+          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
+            cp \
+              "$BUILD_DIR/bootloader.bin" \
+              "$DIST_DIR/bootloader.bin"
+          fi
+
+          if [ -f "$BUILD_DIR/partitions.bin" ]; then
+            cp \
+              "$BUILD_DIR/partitions.bin" \
+              "$DIST_DIR/partitions.bin"
+          fi
+
+      # ============================================================
+      # CHECKSUMS
+      # ============================================================
+      - name: Generate SHA256 checksums
+        working-directory: dist
+        run: |
+          sha256sum *.bin *.elf 2>/dev/null > SHA256SUMS.txt || true
+
+          echo
+          echo "=== SHA256 ==="
+          cat SHA256SUMS.txt
+
+      # ============================================================
+      # BUILD INFO
+      # ============================================================
+      - name: Generate build information
+        shell: bash
+        run: |
+          {
+            echo "ControlOS v1.0 Core Deck"
+            echo
+            echo "Target: LILYGO T-Embed CC1101 Plus"
+            echo "PlatformIO environment: t_embed_cc1101_plus"
+            echo "Git commit: $GITHUB_SHA"
+            echo "Git ref: $GITHUB_REF"
+            echo "Workflow run: $GITHUB_RUN_NUMBER"
+            echo "Built UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > dist/build-info.txt
+
+      # ============================================================
+      # DISPLAY OUTPUT
+      # ============================================================
+      - name: List generated artifacts
+        run: |
+          echo "=== ControlOS Build Artifacts ==="
+          ls -lah dist/
+
+      # ============================================================
+      # UPLOAD
+      # ============================================================
+      - name: Upload ControlOS firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: controlos-t-embed-cc1101-plus-${{ github.run_number }}
+          path: |
+            dist/controlos-t-embed-cc1101-plus.bin
+            dist/controlos-t-embed-cc1101-plus.elf
+            dist/bootloader.bin
+            dist/partitions.bin
+            dist/SHA256SUMS.txt
+            dist/build-info.txt
+          if-no-files-found: warn
+          retention-days: 30
