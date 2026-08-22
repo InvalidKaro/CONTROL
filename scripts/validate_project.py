@@ -8,7 +8,7 @@ errors = []
 required = [
     'platformio.ini', 'include/app.h', 'include/board_pins.h',
     'src/main.cpp', 'src/core/ControlOS.cpp', 'src/core/WebUi.cpp',
-    '.github/workflows/build.yml'
+    '.github/workflows/build.yaml'
 ]
 for item in required:
     if not (root / item).exists():
