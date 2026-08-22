@@ -302,7 +302,9 @@ void WebUi::enqueue(RemoteCommandType type, int value) {
   if (next == queueTail_) {
     queueTail_ = static_cast<uint8_t>((queueTail_ + 1) % QueueSize);
   }
-  queue_[queueHead_] = {type, value};
+
+  queue_[queueHead_].type = type;
+  queue_[queueHead_].value = value;
   queueHead_ = next;
 }
 
