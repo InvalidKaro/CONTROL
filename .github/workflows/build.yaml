@@ -10,8 +10,9 @@ on:
     paths:
       - "src/**"
       - "include/**"
+      - "scripts/**"
       - "platformio.ini"
-      - ".github/workflows/build.yml"
+      - ".github/workflows/build.yaml"
 
   pull_request:
     branches:
@@ -35,16 +36,17 @@ jobs:
 
       # ============================================================
       # PYTHON
+      # No pip cache here because this repo has no requirements.txt
+      # or pyproject.toml. setup-python otherwise fails immediately.
       # ============================================================
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
 
       # ============================================================
       # NODE.JS
-      # Used to validate the JavaScript embedded inside WebUi.cpp.
+      # Used to validate JavaScript embedded inside WebUi.cpp.
       # ============================================================
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -55,7 +57,10 @@ jobs:
       # PROJECT VALIDATION
       # ============================================================
       - name: Run ControlOS project validator
+        shell: bash
         run: |
+          set -euo pipefail
+
           if [ -f scripts/validate_project.py ]; then
             python scripts/validate_project.py
           else
@@ -66,7 +71,10 @@ jobs:
       # WEBUI JAVASCRIPT VALIDATION
       # ============================================================
       - name: Validate embedded WebUI JavaScript
+        shell: bash
         run: |
+          set -euo pipefail
+
           python - <<'PY'
           from pathlib import Path
 
@@ -84,7 +92,6 @@ jobs:
               raise SystemExit("Embedded WebUI <script> block not found")
 
           script_start += len("<script>")
-
           javascript = source[script_start:script_end]
 
           output = Path("/tmp/controlos-webui.js")
@@ -99,29 +106,26 @@ jobs:
       # PLATFORMIO
       # ============================================================
       - name: Install PlatformIO
+        shell: bash
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
-          pip install --upgrade platformio
+          python -m pip install --upgrade platformio
 
       - name: Show PlatformIO version
-        run: |
-          pio --version
+        run: pio --version
 
       # ============================================================
       # BUILD
       # ============================================================
       - name: Build ControlOS
-        run: |
-          pio run -e t_embed_cc1101_plus
+        run: pio run -e t_embed_cc1101_plus
 
       # ============================================================
       # BUILD SIZE
       # ============================================================
       - name: Show firmware size
-        run: |
-          pio run \
-            -e t_embed_cc1101_plus \
-            -t size
+        run: pio run -e t_embed_cc1101_plus -t size
 
       # ============================================================
       # PREPARE OUTPUT
@@ -141,37 +145,31 @@ jobs:
             exit 1
           fi
 
-          cp \
-            "$BUILD_DIR/firmware.bin" \
-            "$DIST_DIR/controlos-t-embed-cc1101-plus.bin"
+          cp "$BUILD_DIR/firmware.bin"              "$DIST_DIR/controlos-t-embed-cc1101-plus.bin"
 
           if [ -f "$BUILD_DIR/firmware.elf" ]; then
-            cp \
-              "$BUILD_DIR/firmware.elf" \
-              "$DIST_DIR/controlos-t-embed-cc1101-plus.elf"
+            cp "$BUILD_DIR/firmware.elf"                "$DIST_DIR/controlos-t-embed-cc1101-plus.elf"
           fi
 
           if [ -f "$BUILD_DIR/bootloader.bin" ]; then
-            cp \
-              "$BUILD_DIR/bootloader.bin" \
-              "$DIST_DIR/bootloader.bin"
+            cp "$BUILD_DIR/bootloader.bin"                "$DIST_DIR/bootloader.bin"
           fi
 
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
-            cp \
-              "$BUILD_DIR/partitions.bin" \
-              "$DIST_DIR/partitions.bin"
+            cp "$BUILD_DIR/partitions.bin"                "$DIST_DIR/partitions.bin"
           fi
 
       # ============================================================
       # CHECKSUMS
       # ============================================================
       - name: Generate SHA256 checksums
+        shell: bash
         working-directory: dist
         run: |
-          sha256sum *.bin *.elf 2>/dev/null > SHA256SUMS.txt || true
+          set -euo pipefail
 
-          echo
+          find . -maxdepth 1 -type f \( -name '*.bin' -o -name '*.elf' \) -print0             | sort -z             | xargs -0 -r sha256sum > SHA256SUMS.txt
+
           echo "=== SHA256 ==="
           cat SHA256SUMS.txt
 
@@ -181,6 +179,8 @@ jobs:
       - name: Generate build information
         shell: bash
         run: |
+          set -euo pipefail
+
           {
             echo "ControlOS v1.0 Core Deck"
             echo
@@ -207,12 +207,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: controlos-t-embed-cc1101-plus-${{ github.run_number }}
-          path: |
-            dist/controlos-t-embed-cc1101-plus.bin
-            dist/controlos-t-embed-cc1101-plus.elf
-            dist/bootloader.bin
-            dist/partitions.bin
-            dist/SHA256SUMS.txt
-            dist/build-info.txt
-          if-no-files-found: warn
+          path: dist/
+          if-no-files-found: error
           retention-days: 30
