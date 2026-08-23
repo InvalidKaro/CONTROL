@@ -14,10 +14,50 @@
 #include "AutomationEngine.h"
 
 namespace {
-constexpr char kApPassword[] = "controlos";
+constexpr char kApPassword[] = "control";
 constexpr char kMutationHeader[] = "X-ControlOS";
 constexpr char kMutationValue[] = "1";
-const char* kHeaderKeys[] = {kMutationHeader};
+constexpr char kSessionCookie[] = "CONTROLSESSION";
+constexpr char kLoginPath[] = "/login";
+constexpr char kLogoutPath[] = "/logout";
+const char* kHeaderKeys[] = {kMutationHeader, "Cookie"};
+
+
+const char kLoginHtml[] PROGMEM = R"LOGIN(
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050806">
+<title>ControlOS Login</title>
+<style>
+:root{--bg:#050806;--panel:#0a110d;--line:#173d27;--green:#00ff72;--muted:#7f9b88;--text:#e8fff0;--danger:#ff6474}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:radial-gradient(circle at top,#0c1e13,#050806 45%,#020403);color:var(--text);font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+body{display:grid;place-items:center;padding:18px}
+.card{width:min(420px,100%);border:1px solid var(--line);background:rgba(8,16,11,.96);border-radius:18px;padding:22px;box-shadow:0 0 40px rgba(0,255,114,.08)}
+.brand{color:var(--green);font-weight:900;letter-spacing:.12em;font-size:28px}
+.sub{margin:7px 0 22px;color:var(--muted);font-size:12px}
+label{display:block;color:var(--muted);font-size:11px;margin-bottom:7px}
+input{width:100%;border:1px solid var(--line);background:#030704;color:var(--text);border-radius:11px;padding:13px;font:inherit;outline:none}
+input:focus{border-color:var(--green)}
+button{width:100%;margin-top:12px;border:0;border-radius:11px;background:var(--green);color:#00190a;padding:13px;font:inherit;font-weight:900;cursor:pointer}
+.note{margin-top:15px;color:var(--muted);font-size:11px;line-height:1.5}
+</style>
+</head>
+<body>
+<form class="card" method="post" action="/login">
+<div class="brand">CONTROL//OS</div>
+<div class="sub">T-Embed CC1101 Plus · Secure Local Control</div>
+<label for="password">ControlOS password</label>
+<input id="password" name="password" type="password" autocomplete="current-password" autofocus>
+<button type="submit">OPEN CONTROL PANEL</button>
+<div class="note">Wi-Fi: <b>ControlOS</b><br>Address: <b>http://172.0.0.1</b></div>
+</form>
+</body>
+</html>
+)LOGIN";
 
 const char kIndexHtml[] PROGMEM = R"HTML(
 <!doctype html>
@@ -47,7 +87,7 @@ const char kIndexHtml[] PROGMEM = R"HTML(
 </head>
 <body>
 <div class="shell">
-  <div class="top"><div><div class="brand">CONTROL//OS</div><div class="sub">T-Embed CC1101 Plus · Web Control Plane</div></div><div class="live" id="live">CONNECTING...</div></div>
+  <div class="top"><div><div class="brand">CONTROL//OS</div><div class="sub">T-Embed CC1101 Plus · Dedicated AP Control Plane</div></div><div style="display:flex;gap:8px;align-items:center"><div class="live" id="live">CONNECTING...</div><a class="btn" style="text-decoration:none;padding:8px 10px" href="/logout">Logout</a></div></div>
   <div class="tabs">
     <button class="tab active" data-tab="dash">Dashboard</button>
     <button class="tab" data-tab="remote">Remote</button>
@@ -85,7 +125,7 @@ const char kIndexHtml[] PROGMEM = R"HTML(
         <button class="btn" onclick="control('screen_on')">Display On</button>
         <button class="btn" onclick="control('screen_off')">Display Off</button>
         <button class="btn danger" onclick="confirmAction('reboot','Reboot device?')">Reboot</button>
-      </div><div class="small" style="margin-top:14px">AP and WebUI remain active while ControlOS apps are used. Wi-Fi Radar runs in AP+STA mode.</div></div>
+      </div><div class="small" style="margin-top:14px">ControlOS runs its own isolated access point at 172.0.0.1 while the WebUI is active.</div></div>
       <div class="card w12"><h2>Direct App Launcher</h2><div class="apps" id="appsRemote"></div></div>
     </div>
   </section>
@@ -234,39 +274,79 @@ void WebUi::begin(App** apps, int appCount, LedController* leds, PowerManager* p
   themes_ = themes;
   automations_ = automations;
 
-  const uint64_t chip = ESP.getEfuseMac();
-  char suffix[7];
-  snprintf(suffix, sizeof(suffix), "%06llX", static_cast<unsigned long long>(chip & 0xFFFFFFULL));
-  ssid_ = String("ControlOS-") + suffix;
+  ssid_ = "ControlOS";
   webPassword_ = "control";
+
+  const uint64_t chip = ESP.getEfuseMac();
+  sessionToken_ =
+      String(static_cast<uint32_t>(chip >> 32), HEX) +
+      String(static_cast<uint32_t>(chip), HEX) +
+      String(esp_random(), HEX) +
+      String(millis(), HEX);
 
   pinMode(BoardPins::SdCs, OUTPUT);
   digitalWrite(BoardPins::SdCs, HIGH);
   flashReady_ = LittleFS.begin(true);
   sdReady_ = ensureSd();
 
-  WiFi.mode(WIFI_AP_STA);
+  WiFi.persistent(false);
+  WiFi.disconnect(true, true);
+  delay(80);
+  WiFi.mode(WIFI_OFF);
+  delay(80);
+  WiFi.mode(WIFI_AP);
   WiFi.setSleep(false);
+
   const IPAddress localIp(172, 0, 0, 1);
   const IPAddress gateway(172, 0, 0, 1);
   const IPAddress subnet(255, 255, 255, 0);
-  WiFi.softAPConfig(localIp, gateway, subnet);
-  running_ = WiFi.softAP(ssid_.c_str(), kApPassword);
+
+  const bool configured =
+      WiFi.softAPConfig(
+          localIp,
+          gateway,
+          subnet
+      );
+
+  running_ =
+      configured &&
+      WiFi.softAP(
+          ssid_.c_str(),
+          kApPassword,
+          6,
+          false,
+          4
+      );
+
+  if (running_) {
+    dns_.setErrorReplyCode(
+        DNSReplyCode::NoError
+    );
+    dns_.start(
+        53,
+        "*",
+        localIp
+    );
+  }
 
   configureRoutes();
-  server_.collectHeaders(kHeaderKeys, 1);
+  server_.collectHeaders(kHeaderKeys, 2);
   server_.begin();
   ws_.begin();
   ws_.onEvent([](uint8_t, WStype_t, uint8_t*, size_t) {});
 
   log(String("WebUI started at http://") + ip());
   log(String("Telemetry WebSocket ws://") + ip() + ":81");
-  log(String("SSID ") + ssid_ + " / user admin");
+  log(String("SSID ") + ssid_ + " / AP password control / WebUI password control");
   if (!flashReady_) log("LittleFS mount failed");
   if (!sdReady_) log("microSD not mounted");
 }
 
 void WebUi::loop() {
+  if (running_) {
+    dns_.processNextRequest();
+  }
+
   server_.handleClient();
   ws_.loop();
   const uint32_t now = millis();
@@ -316,10 +396,164 @@ void WebUi::log(const String& message) {
   Serial.println(String("[WEB] ") + message);
 }
 
+String WebUi::cookieValue(const String& name) const {
+  if (!server_.hasHeader("Cookie")) {
+    return "";
+  }
+
+  const String cookie =
+      server_.header("Cookie");
+
+  const String key =
+      name + "=";
+
+  int start =
+      cookie.indexOf(key);
+
+  if (start < 0) {
+    return "";
+  }
+
+  start += key.length();
+
+  int end =
+      cookie.indexOf(';', start);
+
+  if (end < 0) {
+    end = cookie.length();
+  }
+
+  String value =
+      cookie.substring(start, end);
+
+  value.trim();
+
+  return value;
+}
+
+bool WebUi::authenticated() const {
+  const String token =
+      cookieValue(kSessionCookie);
+
+  return
+      !sessionToken_.isEmpty() &&
+      token == sessionToken_;
+}
+
 bool WebUi::authorize() {
-  if (server_.authenticate("admin", webPassword_.c_str())) return true;
-  server_.requestAuthentication(BASIC_AUTH, "ControlOS");
+  if (authenticated()) {
+    return true;
+  }
+
+  server_.sendHeader(
+      "Location",
+      kLoginPath,
+      true
+  );
+
+  server_.send(
+      302,
+      "text/plain",
+      "ControlOS login required"
+  );
+
   return false;
+}
+
+void WebUi::sendLogin() {
+  if (authenticated()) {
+    server_.sendHeader(
+        "Location",
+        "/",
+        true
+    );
+
+    server_.send(
+        302,
+        "text/plain",
+        "Already authenticated"
+    );
+
+    return;
+  }
+
+  server_.send_P(
+      200,
+      "text/html; charset=utf-8",
+      kLoginHtml
+  );
+}
+
+void WebUi::handleLogin() {
+  if (!server_.hasArg("password")) {
+    server_.send(
+        400,
+        "text/plain",
+        "Password required"
+    );
+
+    return;
+  }
+
+  if (server_.arg("password") != webPassword_) {
+    log("WebUI login rejected");
+
+    server_.send(
+        401,
+        "text/html; charset=utf-8",
+        "<!doctype html><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<body style='background:#050806;color:#ff6474;font-family:monospace;padding:24px'>"
+        "<h2>CONTROL//OS</h2><p>Wrong password.</p>"
+        "<p><a style='color:#00ff72' href='/login'>Try again</a></p></body>"
+    );
+
+    return;
+  }
+
+  const String cookie =
+      String(kSessionCookie) +
+      "=" +
+      sessionToken_ +
+      "; Path=/; HttpOnly; SameSite=Lax";
+
+  server_.sendHeader(
+      "Set-Cookie",
+      cookie
+  );
+
+  server_.sendHeader(
+      "Location",
+      "/",
+      true
+  );
+
+  server_.send(
+      302,
+      "text/plain",
+      "ControlOS login successful"
+  );
+
+  log("WebUI login accepted");
+}
+
+void WebUi::handleLogout() {
+  server_.sendHeader(
+      "Set-Cookie",
+      String(kSessionCookie) +
+          "=deleted; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+  );
+
+  server_.sendHeader(
+      "Location",
+      kLoginPath,
+      true
+  );
+
+  server_.send(
+      302,
+      "text/plain",
+      "Logged out"
+  );
 }
 
 bool WebUi::mutationAllowed() {
@@ -332,6 +566,30 @@ bool WebUi::mutationAllowed() {
 }
 
 void WebUi::configureRoutes() {
+  server_.on(
+      kLoginPath,
+      HTTP_GET,
+      [this]() {
+        sendLogin();
+      }
+  );
+
+  server_.on(
+      kLoginPath,
+      HTTP_POST,
+      [this]() {
+        handleLogin();
+      }
+  );
+
+  server_.on(
+      kLogoutPath,
+      HTTP_GET,
+      [this]() {
+        handleLogout();
+      }
+  );
+
   server_.on("/", HTTP_GET, [this]() { sendIndex(); });
   server_.on("/api/status", HTTP_GET, [this]() { sendStatus(); });
   server_.on("/api/apps", HTTP_GET, [this]() { sendApps(); });
@@ -363,8 +621,27 @@ void WebUi::configureRoutes() {
       "/api/ota", HTTP_POST, [this]() { handleOtaRequest(); }, [this]() { handleOtaData(); });
 
   server_.onNotFound([this]() {
-    if (!authorize()) return;
-    server_.send(404, "application/json", "{\"error\":\"not found\"}");
+    if (!authenticated()) {
+      server_.sendHeader(
+          "Location",
+          kLoginPath,
+          true
+      );
+
+      server_.send(
+          302,
+          "text/plain",
+          "ControlOS login"
+      );
+
+      return;
+    }
+
+    server_.send(
+        404,
+        "application/json",
+        "{\"error\":\"not found\"}"
+    );
   });
 }
 

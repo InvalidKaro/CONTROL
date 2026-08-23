@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <FS.h>
+#include <DNSServer.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 
@@ -85,6 +86,7 @@ class WebUi {
 
   WebServer server_;
   WebSocketsServer ws_;
+  DNSServer dns_;
 
   App** apps_ = nullptr;
   int appCount_ = 0;
@@ -102,6 +104,7 @@ class WebUi {
 
   String ssid_;
   String webPassword_;
+  String sessionToken_;
 
   bool flashReady_ = false;
   bool sdReady_ = false;
@@ -124,7 +127,13 @@ class WebUi {
 
   void configureRoutes();
   bool authorize();
+  bool authenticated() const;
   bool mutationAllowed();
+
+  void sendLogin();
+  void handleLogin();
+  void handleLogout();
+  String cookieValue(const String& name) const;
   void enqueue(RemoteCommandType type, int value = 0);
   void log(const String& message);
 
