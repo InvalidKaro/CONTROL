@@ -1,12 +1,19 @@
 #pragma once
 
 #include <SD.h>
+
 #include "app.h"
 
 class StorageApp final : public App {
  public:
-  const char* name() const override { return "Storage"; }
-  const char* shortName() const override { return "SD"; }
+  const char* name() const override {
+    return "Storage";
+  }
+
+  const char* shortName() const override {
+    return "SD";
+  }
+
   void begin() override;
   void end() override;
   void tick(uint32_t nowMs) override;
@@ -15,9 +22,12 @@ class StorageApp final : public App {
 
  private:
   void refresh();
+
   bool ready_ = false;
+
   String names_[16];
   bool dirs_[16]{};
+
   int count_ = 0;
   int offset_ = 0;
 };
