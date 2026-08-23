@@ -1,0 +1,46 @@
+CONTROL//OS PRE-BUILD STATIC AUDIT
+
+This package consolidates the previous full-build fixes and adds the missing
+matching headers that would otherwise stop compilation.
+
+Confirmed/fixed:
+- NfcApp.h matches NfcApp.cpp.
+- SubGhzApp.h matches SubGhzApp.cpp.
+- AudioApp header/CPP method set matches.
+- BleApp header/CPP method set matches.
+- ScriptApp header/CPP method set matches.
+- StorageApp header/CPP method set matches.
+- SystemApp header/CPP method set matches.
+- TurtleScript header/CPP method set matches.
+- WebUi queue brace-assignment regression is fixed.
+- WebUi fs::File alias remains present.
+- minimal_boot.cpp has no setup()/loop() definitions.
+- TFT reset remains GPIO40.
+- Duplicate ARDUINO_RUNNING_CORE / ARDUINO_EVENT_RUNNING_CORE overrides removed.
+- Full build remains enabled: no build_src_filter.
+
+Important:
+This is a static consistency audit. A true compiler/linker validation still
+requires PlatformIO because the Arduino/ESP32 third-party libraries are not
+available in this execution environment.
+
+Static audit output:
+[OK] AudioApp: 6 CPP methods matched
+[OK] BleApp: 9 CPP methods matched
+[OK] NfcApp: 6 CPP methods matched
+[OK] ScriptApp: 8 CPP methods matched
+[OK] StorageApp: 6 CPP methods matched
+[OK] SubGhzApp: 10 CPP methods matched
+[OK] SystemApp: 5 CPP methods matched
+[OK] TurtleScript: 7 CPP methods matched
+[OK] NFC onSelect declaration
+[OK] NFC addHistory declaration
+[OK] SubGHz frequencyAt declaration
+[OK] SubGHz completeSweep declaration
+[OK] SubGHz peaks field
+[OK] SubGHz waterfall field
+[OK] WebUI explicit queue assignment
+[OK] Turtle typed radius fix
+[OK] minimal_boot disabled
+[OK] TFT reset GPIO40
+[OK] No duplicate ARDUINO_RUNNING_CORE override
