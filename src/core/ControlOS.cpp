@@ -4,6 +4,7 @@
 #include <Wire.h>
 
 #include "Ui.h"
+#include "RuntimeDebug.h"
 #include "board_pins.h"
 #include "theme.h"
 
@@ -37,13 +38,39 @@ ControlOS::ControlOS()
       } {}
 
 void ControlOS::begin() {
-  Serial.begin(115200);
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::EnterControlOS,
+      "ControlOS::begin entered"
+  );
 
   pinMode(BoardPins::PowerEnable, OUTPUT);
   digitalWrite(BoardPins::PowerEnable, HIGH);
 
   pinMode(BoardPins::DisplayBacklight, OUTPUT);
   digitalWrite(BoardPins::DisplayBacklight, HIGH);
+
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::PowerPins,
+      "power and backlight enabled"
+  );
+
+  /*
+   * GPIO40 is shared with the known T-Embed CC1101 display reset /
+   * speaker clock path. In the self-debug firmware the speaker stays
+   * disabled during startup.
+   */
+  pinMode(BoardPins::VoiceLrclk, OUTPUT);
+  digitalWrite(BoardPins::VoiceLrclk, HIGH);
+  delay(5);
+  digitalWrite(BoardPins::VoiceLrclk, LOW);
+  delay(25);
+  digitalWrite(BoardPins::VoiceLrclk, HIGH);
+  delay(120);
+
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::DisplayReset,
+      "display reset pulse completed"
+  );
 
   pinMode(BoardPins::SdCs, OUTPUT);
   pinMode(BoardPins::Cc1101Cs, OUTPUT);
@@ -55,10 +82,42 @@ void ControlOS::begin() {
   digitalWrite(BoardPins::Cc1101Cs, HIGH);
   digitalWrite(BoardPins::NrfCs, HIGH);
 
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::DisplayInit,
+      "calling TFT init"
+  );
+
+  tft_.init();
+  tft_.setRotation(3);
+  tft_.setTextWrap(false);
+
+  tft_.writecommand(0x11);
+  delay(120);
+
+  tft_.writecommand(0x29);
+  delay(20);
+
+  digitalWrite(
+      BoardPins::DisplayBacklight,
+      HIGH
+  );
+
+  RuntimeDebug::attachDisplay(&tft_);
+
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::DisplayReady,
+      "ST7789 initialized and visible"
+  );
+
   SPI.begin(
       BoardPins::SpiSck,
       BoardPins::SpiMiso,
       BoardPins::SpiMosi
+  );
+
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::SpiReady,
+      "shared SPI bus initialized"
   );
 
   Wire.begin(
@@ -66,18 +125,70 @@ void ControlOS::begin() {
       BoardPins::I2cScl
   );
 
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::I2cReady,
+      "I2C bus initialized"
+  );
+
+  /*
+   * Persistent file logger:
+   *
+   * /logs/controlos-debug.log
+   *
+   * Every boot appends a session. The file rotates automatically at
+   * roughly 64 KiB to /logs/controlos-debug.old.log.
+   */
+  if (RuntimeDebug::enableFileLogging()) {
+    RuntimeDebug::mark(
+        RuntimeDebug::Stage::FileLogReady,
+        "/logs/controlos-debug.log active"
+    );
+  }
+
   themes_.begin();
+
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::ThemeReady,
+      "ThemeManager ready"
+  );
+
   power_.begin();
+
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::PowerReady,
+      "PowerManager ready"
+  );
+
   automations_.begin();
 
-  tft_.init();
-  tft_.setRotation(3);
-  tft_.setTextWrap(false);
-  tft_.fillScreen(Theme::Bg);
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::AutomationReady,
+      "AutomationEngine ready"
+  );
 
   input_.begin();
+
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::InputReady,
+      "Input ready"
+  );
+
   leds_.begin();
-  sounds_.begin();
+
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::LedReady,
+      "LED controller ready; speaker deferred"
+  );
+
+  /*
+   * Speaker remains disabled in this diagnostic build so a possible
+   * GPIO40 display/speaker conflict cannot hide the real boot stage.
+   */
+
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::WebStarting,
+      "starting WebUI / storage / Wi-Fi"
+  );
 
   web_.begin(
       apps_,
@@ -88,11 +199,29 @@ void ControlOS::begin() {
       &automations_
   );
 
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::WebReady,
+      "WebUI begin returned"
+  );
+
   BootSequence::RuntimeStatus bootStatus;
-  bootStatus.webReady = web_.running();
-  bootStatus.flashReady = web_.flashReady();
-  bootStatus.sdReady = web_.sdReady();
-  bootStatus.ip = web_.ip();
+
+  bootStatus.webReady =
+      web_.running();
+
+  bootStatus.flashReady =
+      web_.flashReady();
+
+  bootStatus.sdReady =
+      web_.sdReady();
+
+  bootStatus.ip =
+      web_.ip();
+
+  RuntimeDebug::mark(
+      RuntimeDebug::Stage::BootSequence,
+      "starting ControlOS boot animation"
+  );
 
   boot_.begin(
       tft_,
@@ -100,8 +229,6 @@ void ControlOS::begin() {
   );
 
   syncWebState();
-
-  Serial.println("[UI] Boot sequence started");
 }
 
 void ControlOS::openSelected() {
@@ -336,6 +463,16 @@ void ControlOS::syncWebState() {
 }
 
 void ControlOS::loop() {
+  static bool runtimeMarked = false;
+
+  if (!runtimeMarked) {
+    runtimeMarked = true;
+
+    RuntimeDebug::mark(
+        RuntimeDebug::Stage::LoopRunning,
+        "ControlOS main loop entered"
+    );
+  }
   /*
    * These locals deliberately live for the lifetime of the firmware.
    * They allow the boot -> launcher handoff to be acknowledged exactly
@@ -445,6 +582,11 @@ void ControlOS::loop() {
       launcherEnteredMs = nowMs;
       lastLauncherRecoveryFrameMs = nowMs;
 
+      RuntimeDebug::mark(
+          RuntimeDebug::Stage::LauncherReady,
+          "boot finished; launcher rendered"
+      );
+
       Serial.println(
           "[UI] Boot finished -> launcher rendered"
       );
@@ -479,6 +621,11 @@ void ControlOS::loop() {
     launcherInitialized = true;
     launcherEnteredMs = nowMs;
     lastLauncherRecoveryFrameMs = nowMs;
+
+    RuntimeDebug::mark(
+        RuntimeDebug::Stage::LauncherReady,
+        "launcher fallback rendered"
+    );
 
     Serial.println(
         "[UI] Launcher fallback render"
