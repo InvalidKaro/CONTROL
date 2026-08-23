@@ -396,7 +396,7 @@ void WebUi::log(const String& message) {
   Serial.println(String("[WEB] ") + message);
 }
 
-String WebUi::cookieValue(const String& name) const {
+String WebUi::cookieValue(const String& name) {
   if (!server_.hasHeader("Cookie")) {
     return "";
   }
@@ -431,7 +431,7 @@ String WebUi::cookieValue(const String& name) const {
   return value;
 }
 
-bool WebUi::authenticated() const {
+bool WebUi::authenticated() {
   const String token =
       cookieValue(kSessionCookie);
 

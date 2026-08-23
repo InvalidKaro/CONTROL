@@ -127,13 +127,13 @@ class WebUi {
 
   void configureRoutes();
   bool authorize();
-  bool authenticated() const;
+  bool authenticated();
   bool mutationAllowed();
 
   void sendLogin();
   void handleLogin();
   void handleLogout();
-  String cookieValue(const String& name) const;
+  String cookieValue(const String& name);
   void enqueue(RemoteCommandType type, int value = 0);
   void log(const String& message);
 
