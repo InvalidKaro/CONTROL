@@ -4,54 +4,90 @@
 #include "theme.h"
 
 void ScriptApp::ensureDefaults() {
-  if (!LittleFS.begin(true)) return;
-  if (!LittleFS.exists("/scripts")) LittleFS.mkdir("/scripts");
+  if (!LittleFS.begin(true)) {
+    return;
+  }
+
+  if (!LittleFS.exists("/scripts")) {
+    LittleFS.mkdir("/scripts");
+  }
+
   if (!LittleFS.exists("/scripts/circuit.cos")) {
-    File f = LittleFS.open("/scripts/circuit.cos", FILE_WRITE);
-    if (f) {
-      f.println("CLEAR #000000");
-      f.println("COLOR #00FF50");
-      f.println("GOTO 24 85");
-      f.println("FORWARD 55");
-      f.println("RIGHT 90");
-      f.println("FORWARD 28");
-      f.println("LEFT 90");
-      f.println("FORWARD 72");
-      f.println("LEFT 45");
-      f.println("FORWARD 35");
-      f.println("TEXT CONTROL//OS");
-      f.println("WAIT 900");
-      f.close();
+    fs::File file =
+        LittleFS.open(
+            "/scripts/circuit.cos",
+            FILE_WRITE
+        );
+
+    if (file) {
+      file.println("CLEAR #000000");
+      file.println("COLOR #00FF50");
+      file.println("GOTO 24 85");
+      file.println("FORWARD 55");
+      file.println("RIGHT 90");
+      file.println("FORWARD 28");
+      file.println("LEFT 90");
+      file.println("FORWARD 72");
+      file.println("LEFT 45");
+      file.println("FORWARD 35");
+      file.println("TEXT CONTROL//OS");
+      file.println("WAIT 900");
+      file.close();
     }
   }
 }
 
-void ScriptApp::scanFs(fs::FS& fs, const char* rootPath, bool sd) {
-  File root = fs.open(rootPath);
-  if (!root || !root.isDirectory()) return;
+void ScriptApp::scanFs(
+    fs::FS& fs,
+    const char* rootPath,
+    bool sd
+) {
+  fs::File root =
+      fs.open(rootPath);
 
-  File f = root.openNextFile();
-  while (f && count_ < 16) {
-    if (!f.isDirectory()) {
-      String path = f.name();
+  if (!root || !root.isDirectory()) {
+    return;
+  }
+
+  fs::File file =
+      root.openNextFile();
+
+  while (file && count_ < 16) {
+    if (!file.isDirectory()) {
+      String path =
+          file.name();
 
       if (path.endsWith(".cos")) {
-        paths_[count_] = path;
+        paths_[count_] =
+            path;
 
-        String name = path;
-        const int slash = name.lastIndexOf('/');
+        String name =
+            path;
+
+        const int slash =
+            name.lastIndexOf('/');
+
         if (slash >= 0) {
-          name = name.substring(slash + 1);
+          name =
+              name.substring(slash + 1);
         }
 
-        names_[count_] = String(sd ? "SD:" : "FS:") + name;
+        names_[count_] =
+            String(
+                sd
+                    ? "SD:"
+                    : "FS:"
+            ) +
+            name;
+
         onSd_[count_] = sd;
+
         ++count_;
       }
     }
 
-    f.close();
-    f = root.openNextFile();
+    file.close();
+    file = root.openNextFile();
   }
 
   root.close();
@@ -60,14 +96,22 @@ void ScriptApp::scanFs(fs::FS& fs, const char* rootPath, bool sd) {
 void ScriptApp::refresh() {
   count_ = 0;
 
-  scanFs(LittleFS, "/scripts", false);
+  scanFs(
+      LittleFS,
+      "/scripts",
+      false
+  );
 
   if (SD.cardType() != CARD_NONE) {
     if (!SD.exists("/scripts")) {
       SD.mkdir("/scripts");
     }
 
-    scanFs(SD, "/scripts", true);
+    scanFs(
+        SD,
+        "/scripts",
+        true
+    );
   }
 
   if (selected_ >= count_) {
@@ -82,15 +126,26 @@ void ScriptApp::begin() {
 }
 
 void ScriptApp::onEncoder(int delta) {
-  if (runningView_ || count_ == 0) return;
+  if (
+      runningView_ ||
+      count_ == 0 ||
+      delta == 0
+  ) {
+    return;
+  }
 
-  int next = static_cast<int>(selected_) + delta;
+  int next =
+      static_cast<int>(selected_) +
+      delta;
 
   while (next < 0) {
     next += count_;
   }
 
-  selected_ = next % count_;
+  selected_ =
+      static_cast<uint8_t>(
+          next % count_
+      );
 }
 
 void ScriptApp::onSelect() {
@@ -100,15 +155,26 @@ void ScriptApp::onSelect() {
     return;
   }
 
-  if (!count_ || tft_ == nullptr) return;
+  if (
+      count_ == 0 ||
+      tft_ == nullptr
+  ) {
+    return;
+  }
 
   script_.attach(tft_);
 
-  fs::FS& fs = onSd_[selected_]
-                   ? static_cast<fs::FS&>(SD)
-                   : static_cast<fs::FS&>(LittleFS);
+  fs::FS& fs =
+      onSd_[selected_]
+          ? static_cast<fs::FS&>(SD)
+          : static_cast<fs::FS&>(LittleFS);
 
-  if (script_.load(fs, paths_[selected_])) {
+  if (
+      script_.load(
+          fs,
+          paths_[selected_]
+      )
+  ) {
     runningView_ = true;
     script_.start();
   }
@@ -125,8 +191,14 @@ void ScriptApp::render(TFT_eSPI& tft) {
 
   if (runningView_) {
     if (!script_.running()) {
-      const String status = script_.status();
-      Ui::footer(tft, status.c_str(), "ENC: return");
+      const String status =
+          script_.status();
+
+      Ui::footer(
+          tft,
+          status.c_str(),
+          "ENC: return"
+      );
     }
 
     return;
@@ -134,7 +206,12 @@ void ScriptApp::render(TFT_eSPI& tft) {
 
   tft.fillScreen(Theme::Bg);
 
-  Ui::header(tft, "SCRIPT LAB", String(count_) + " scripts");
+  Ui::header(
+      tft,
+      "SCRIPT LAB",
+      String(count_) +
+          " scripts"
+  );
 
   if (!count_) {
     Ui::centered(
@@ -145,26 +222,40 @@ void ScriptApp::render(TFT_eSPI& tft) {
         2
     );
   } else {
-    const uint8_t first = selected_ > 4 ? selected_ - 4 : 0;
+    const uint8_t first =
+        selected_ > 4
+            ? selected_ - 4
+            : 0;
 
     for (
         uint8_t row = 0;
-        row < 5 && first + row < count_;
+        row < 5 &&
+        first + row < count_;
         ++row
     ) {
-      const uint8_t i = first + row;
-      const int y = 32 + row * 21;
+      const uint8_t index =
+          first + row;
 
-      if (i == selected_) {
-        Ui::panel(tft, 8, y, 304, 18, true);
+      const int y =
+          32 + row * 21;
+
+      if (index == selected_) {
+        Ui::panel(
+            tft,
+            8,
+            y,
+            304,
+            18,
+            true
+        );
       }
 
       Ui::text(
           tft,
           14,
           y + 2,
-          names_[i],
-          i == selected_
+          names_[index],
+          index == selected_
               ? Theme::PrimaryBright
               : Theme::Text,
           1
@@ -172,5 +263,9 @@ void ScriptApp::render(TFT_eSPI& tft) {
     }
   }
 
-  Ui::footer(tft, "TURN: script", "ENC: run");
+  Ui::footer(
+      tft,
+      "TURN: script",
+      "ENC: run"
+  );
 }
